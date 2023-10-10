@@ -19,7 +19,7 @@ from skimage.measure import regionprops
 parser = argparse.ArgumentParser()
 required_named = parser.add_argument_group('required arguments')
 parser.add_argument('--model_path', help='experiments/subfolder where checkpoint is', default='experiments/wnet_drive')
-parser.add_argument('--im_path', help='path to image to be segmented', default=None)
+parser.add_argument('--im_dir', help='path to image to be segmented', default=None)
 parser.add_argument('--mask_path', help='path to FOv mask, will be computed if not provided', default=None)
 parser.add_argument('--tta', type=str, default='from_preds', help='test-time augmentation (no/from_logits/from_preds)')
 parser.add_argument('--bin_thresh', type=float, default='0.4196', help='binarizing threshold')
@@ -155,20 +155,11 @@ if __name__ == '__main__':
 
     model_name = 'wnet'
     model_path = args.model_path
-    im_path = args.im_path
-    im_loc = osp.dirname(im_path)
-    im_name = im_path.rsplit('/', 1)[-1]
+    im_dir = args.im_dir
 
     mask_path = args.mask_path
     result_path = args.result_path
-    if result_path is None:
-        result_path = im_loc
-        im_path_out = osp.join(result_path, im_name.rsplit('.', 1)[-2]+'_seg.png')
-        im_path_out_bin = osp.join(result_path, im_name.rsplit('.', 1)[-2]+'_bin_seg.png')
-    else:
-        os.makedirs(result_path, exist_ok=True)
-        im_path_out = osp.join(result_path, im_name.rsplit('.', 1)[-2]+'_seg.png')
-        im_path_out_bin = osp.join(result_path, im_name.rsplit('.', 1)[-2] + '_bin_seg.png')
+    os.makedirs(result_path, exist_ok=True)
 
     im_size = tuple([int(item) for item in args.im_size.split(',')])
     if isinstance(im_size, tuple) and len(im_size)==1:
@@ -178,22 +169,15 @@ if __name__ == '__main__':
     else:
         sys.exit('im_size should be a number or a tuple of two numbers')
 
-    print('* Segmenting image ' + im_path)
-    img = Image.open(im_path)
-    if mask_path is None:
-        print('* FOV mask not provided, generating it')
-        mask = get_fov(img)
-        print('* FOV mask generated')
-    else: mask = Image.open(mask_path).convert('L')
+    
+    mask = Image.open(mask_path).convert('L')
     mask = np.array(mask).astype(bool)
 
-    img, coords_crop = crop_to_fov(img, mask)
-    original_sz = img.size[1], img.size[0]  # in numpy convention
+    
 
     rsz = p_tr.Resize(tg_size)
     tnsr = p_tr.ToTensor()
     tr = p_tr.Compose([rsz, tnsr])
-    im_tens = tr(img)  # only transform image
 
     print('* Instantiating model  = ' + str(model_name))
     model = get_arch(model_name).to(device)
@@ -203,13 +187,20 @@ if __name__ == '__main__':
     model, stats = load_model(model, model_path, device)
     model.eval()
 
-    print('* Saving prediction to ' + im_path_out)
     start_time = time.perf_counter()
-    full_pred, full_pred_bin = create_pred(model, im_tens, mask, coords_crop, original_sz, bin_thresh=bin_thresh, tta=tta)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        imsave(im_path_out, img_as_ubyte(full_pred))
-        imsave(im_path_out_bin, img_as_ubyte(full_pred_bin))
+    image_list=os.listdir(im_dir)
+    for image_name in image_list:
+        im_path=os.path.join(im_dir,image_name)
+        img = Image.open(im_path)
+        img, coords_crop = crop_to_fov(img, mask)
+        original_sz = img.size[1], img.size[0]  # in numpy convention
+        im_id=image_name.split('.')[0]
+        im_path_out = osp.join(result_path, im_id+'.png')
+        im_tens = tr(img)  # only transform image
+        full_pred, full_pred_bin = create_pred(model, im_tens, mask, coords_crop, original_sz, bin_thresh=bin_thresh,   tta=tta)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            imsave(im_path_out, img_as_ubyte(full_pred))
     print('Done, time spent = {:.3f} secs'.format(time.perf_counter() - start_time))
 
 

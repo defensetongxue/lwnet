@@ -9,7 +9,8 @@ __pycache__
 *.swp
 *.pyc
 
-
+src
+result
 data
 
 # Ignore result directories
